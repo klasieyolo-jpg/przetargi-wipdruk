@@ -183,19 +183,28 @@ def fetch_ted():
 
 # ---------- Gemini ----------
 def gemini(prompt, search=False, as_json=False):
+    """Wywołanie Gemini z ponawianiem (429/503) i modelem zapasowym."""
+    import time
     key = os.environ["GEMINI_API_KEY"]
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     if search:
         body["tools"] = [{"google_search": {}}]
     if as_json:
         body["generationConfig"] = {"responseMimeType": "application/json"}
-    r = S.post(url, params={"key": key}, json=body, timeout=180)
-    if r.status_code != 200:
-        log(f"Gemini {r.status_code}: {r.text[:400]}")
-    r.raise_for_status()
-    parts = r.json()["candidates"][0]["content"]["parts"]
-    return "".join(p.get("text", "") for p in parts)
+    last = None
+    for model in (GEMINI_MODEL, "gemini-flash-lite-latest"):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        for attempt in range(3):
+            r = S.post(url, params={"key": key}, json=body, timeout=180)
+            if r.status_code == 200:
+                parts = r.json()["candidates"][0]["content"]["parts"]
+                return "".join(p.get("text", "") for p in parts)
+            log(f"Gemini {model} {r.status_code} (próba {attempt + 1}): {r.text[:200]}")
+            last = r
+            if r.status_code not in (429, 500, 503):
+                break
+            time.sleep(20 * (attempt + 1))
+    last.raise_for_status()
 
 
 def judge(cands):
