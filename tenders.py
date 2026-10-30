@@ -1,5 +1,5 @@
 """Monitor przetargów dla WIP-Druk.
-Źródła: BZP (e-Zamówienia), TED (UE), wyszukiwanie Google przez Gemini.
+Źródła: BZP (e-Zamówienia), TED (UE), strony internetowe (Tavily).
 Ocena przydatności i krótki opis: Gemini (darmowy klucz API).
 Wysyłka: Brevo (darmowy plan).
 """
@@ -218,29 +218,55 @@ def judge(cands):
     return keep
 
 
+WEB_QUERIES = [
+    "zapytanie ofertowe druk ulotek plakatów",
+    "zapytanie ofertowe druk kalendarzy katalogów broszur",
+    "zapytanie ofertowe druk materiałów promocyjnych teczek zaproszeń",
+    "zapytanie ofertowe druk wielkoformatowy banery roll-up opakowania kartonowe",
+]
+
+
 def web_search():
-    since = (NOW - timedelta(days=3)).strftime("%d.%m.%Y")
+    """Darmowe wyszukiwanie (Tavily, 1000 zapytań/mies.) + filtr Gemini."""
+    key = os.getenv("TAVILY_API_KEY")
+    if not key:
+        return []
+    hits, urls = [], set()
+    for q in WEB_QUERIES:
+        r = S.post("https://api.tavily.com/search", timeout=60,
+                   headers={"Authorization": f"Bearer {key}"},
+                   json={"query": q, "search_depth": "basic", "max_results": 10,
+                         "time_range": "week", "country": "poland"})
+        if r.status_code != 200:
+            log(f"Tavily {r.status_code}: {r.text[:300]}")
+        r.raise_for_status()
+        for h in r.json().get("results", []):
+            u = h.get("url", "")
+            if u and u not in urls:
+                urls.add(u)
+                hits.append({"url": u, "tytul": h.get("title", ""), "fragment": (h.get("content") or "")[:600]})
+    log(f"Internet: {len(hits)} wyników wyszukiwania")
+    if not hits:
+        return []
     prompt = (
-        f"{PROFILE}\n\nWyszukaj w internecie zapytania ofertowe i przetargi w Polsce "
-        f"opublikowane od {since}, pasujące do tej drukarni, ZWŁASZCZA spoza BZP i TED: "
-        "strony firm, BIP-y gmin, platformazakupowa.pl, ezamawiajacy.pl, Baza Konkurencyjności. "
-        "Uwzględnij też zapowiadane (planowane) zamówienia. Tylko z terminem składania ofert w przyszłości. "
-        'Odpowiedz WYŁĄCZNIE tablicą JSON: [{"tytul":..., "zamawiajacy":..., "termin":"RRRR-MM-DD lub null", '
-        '"wartosc_pln": liczba lub null, "url": "bezpośredni link do ogłoszenia", "opis":"max 10 słów"}]. '
-        "Jeśli nic nie znajdziesz, zwróć []."
+        f"{PROFILE}\n\nDzisiaj jest {NOW:%Y-%m-%d}. Poniżej wyniki wyszukiwania stron internetowych. "
+        "Wybierz TYLKO te, które są aktualnym zapytaniem ofertowym/przetargiem w Polsce (firma, urząd, szkoła itp. "
+        "szuka wykonawcy druku), pasującym do drukarni, z terminem składania ofert w przyszłości lub bez podanego terminu. "
+        "Odrzuć: oferty drukarni, sklepy, poradniki, ogłoszenia z minionym terminem, rozstrzygnięcia. "
+        'Zwróć tablicę JSON: [{"url":..., "tytul":..., "zamawiajacy":..., "termin":"RRRR-MM-DD lub null", '
+        '"wartosc_pln": liczba lub null, "opis":"max 10 słów: co drukować"}]. Jeśli nic nie pasuje, zwróć [].\n\n'
+        + json.dumps(hits, ensure_ascii=False)
     )
-    txt = gemini(prompt, search=True)
-    m = re.search(r"\[.*\]", txt, re.S)
-    items = json.loads(m.group(0)) if m else []
+    items = json.loads(gemini(prompt, as_json=True))
     out = []
-    for it in items:
+    for it in items if isinstance(items, list) else []:
         url = text_of(it.get("url"))
-        if not url.startswith("http"):
-            continue
+        if url not in urls:
+            continue  # tylko linki faktycznie znalezione, bez wymyślonych
         val = it.get("wartosc_pln")
         out.append({
             "id": "web:" + url.split("#")[0].rstrip("/"),
-            "source": "Internet (do weryfikacji)",
+            "source": "Strony internetowe (do weryfikacji)",
             "title": text_of(it.get("tytul")), "buyer": text_of(it.get("zamawiajacy")),
             "city": "", "province": "", "cpv": "",
             "deadline": fmt_date(it.get("termin")),
@@ -248,7 +274,7 @@ def web_search():
             "summary": text_of(it.get("opis")) or text_of(it.get("tytul")),
             "url": url,
         })
-    log(f"Internet: znaleziono {len(out)}")
+    log(f"Internet: pasujących {len(out)}")
     return out
 
 
