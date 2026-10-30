@@ -230,72 +230,101 @@ def judge(cands):
     return keep
 
 
-WEB_QUERIES = [  # 12 zapytań x 2 przebiegi/dzień = ok. 720 z 1000 darmowych miesięcznie
-    "zapytanie ofertowe druk ulotek plakatów folderów",
-    "zapytanie ofertowe druk kalendarzy 2027",
-    "zapytanie ofertowe druk katalogów broszur",
-    "zapytanie ofertowe druk teczek zaproszeń wizytówek",
-    "zapytanie ofertowe druk materiałów promocyjnych informacyjnych projekt unijny",
-    "zapytanie ofertowe druk wielkoformatowy banery roll-up",
-    "zapytanie ofertowe opakowania kartonowe papierowe nadruk",
-    "rozeznanie rynku usługa poligraficzna druk",
-    "zaproszenie do złożenia oferty usługi drukarskie",
-    "bip zapytanie cenowe wykonanie druku",
-    "zapytanie ofertowe gadżety reklamowe długopisy kubki z nadrukiem",
-    "zapytanie ofertowe naklejki notesy karteczki z logo",
+BK = ["bazakonkurencyjnosci.funduszeeuropejskie.gov.pl"]
+# (zapytanie, domeny lub None, grupa). Ok. 14 zapytań x 2 przebiegi/dzień = ok. 840 z 1000 darmowych/mies.
+WEB_QUERIES = [
+    # Baza Konkurencyjności - firmy z dotacjami UE muszą tu publikować zapytania
+    ("zapytanie ofertowe druk materiałów promocyjnych ulotek roll-up", BK, "przetarg"),
+    ("zapytanie ofertowe gadżety reklamowe z logo długopisy kubki", BK, "przetarg"),
+    ("zapytanie ofertowe druk katalogów broszur kalendarzy folderów", BK, "przetarg"),
+    ("zapytanie ofertowe opakowania kartonowe nadruk etykiety naklejki", BK, "przetarg"),
+    # firmy prywatne poza BK
+    ("sp. z o.o. zapytanie ofertowe druk materiałów reklamowych", None, "przetarg"),
+    ("projekt dofinansowany zapytanie ofertowe materiały promocyjne firma", None, "przetarg"),
+    ("firma zapytanie ofertowe opakowania kartonowe z nadrukiem", None, "przetarg"),
+    ("zapytanie ofertowe gadżety reklamowe naklejki notesy z logo firma", None, "przetarg"),
+    # ogólne (także urzędy)
+    ("zapytanie ofertowe druk ulotek plakatów kalendarzy 2027", None, "przetarg"),
+    ("zapytanie ofertowe druk wielkoformatowy banery roll-up", None, "przetarg"),
+    ("rozeznanie rynku usługa poligraficzna druk", None, "przetarg"),
+    ("bip zapytanie cenowe wykonanie druku", None, "przetarg"),
+    # potencjalni klienci: firmy, które dostały dotację na promocję/targi/eksport
+    ("firma otrzymała dofinansowanie promocja marki targi zagraniczne 2026", None, "lead"),
+    ("lista projektów wybranych do dofinansowania internacjonalizacja MŚP promocja 2026", None, "lead"),
 ]
 
 
 def web_search():
-    """Darmowe wyszukiwanie (Tavily, 1000 zapytań/mies.) + filtr Gemini."""
+    """Darmowe wyszukiwanie (Tavily) + ocena Gemini. Zwraca (przetargi, leady)."""
     key = os.getenv("TAVILY_API_KEY")
     if not key:
-        return []
+        return [], []
     hits, urls = [], set()
-    for q in WEB_QUERIES:
-        r = S.post("https://api.tavily.com/search", timeout=60,
-                   headers={"Authorization": f"Bearer {key}"},
-                   json={"query": q, "search_depth": "basic", "max_results": 10,
-                         "time_range": "week", "country": "poland"})
-        if r.status_code != 200:
-            log(f"Tavily {r.status_code}: {r.text[:300]}")
-        r.raise_for_status()
+    for q, domains, grp in WEB_QUERIES:
+        body = {"query": q, "search_depth": "basic", "max_results": 10, "time_range": "week"}
+        if domains:
+            body["include_domains"] = domains
+        else:
+            body["country"] = "poland"
+        try:
+            r = S.post("https://api.tavily.com/search", timeout=60,
+                       headers={"Authorization": f"Bearer {key}"}, json=body)
+            if r.status_code != 200:
+                log(f"Tavily {r.status_code}: {r.text[:200]}")
+                continue
+        except Exception as e:
+            log(f"Tavily błąd: {e}")
+            continue
         for h in r.json().get("results", []):
             u = h.get("url", "")
             if u and u not in urls:
                 urls.add(u)
-                hits.append({"url": u, "tytul": h.get("title", ""), "fragment": (h.get("content") or "")[:600]})
+                hits.append({"url": u, "grupa": grp, "tytul": h.get("title", ""),
+                             "fragment": (h.get("content") or "")[:600]})
     log(f"Internet: {len(hits)} wyników wyszukiwania")
     if not hits:
-        return []
+        return [], []
     prompt = (
-        f"{PROFILE}\n\nDzisiaj jest {NOW:%Y-%m-%d}. Poniżej wyniki wyszukiwania stron internetowych. "
-        "Wybierz TYLKO te, które są aktualnym zapytaniem ofertowym/przetargiem w Polsce (firma, urząd, szkoła itp. "
-        "szuka wykonawcy druku), pasującym do drukarni, z terminem składania ofert w przyszłości lub bez podanego terminu. "
-        "Odrzuć: oferty drukarni, sklepy, poradniki, ogłoszenia z minionym terminem, rozstrzygnięcia. "
-        'Zwróć tablicę JSON: [{"url":..., "tytul":..., "zamawiajacy":..., "termin":"RRRR-MM-DD lub null", '
-        '"wartosc_pln": liczba lub null, "opis":"max 10 słów: co drukować"}]. Jeśli nic nie pasuje, zwróć [].\n\n'
+        f"{PROFILE}\nDrukarnia pracuje w 90% dla FIRM prywatnych.\n\nDzisiaj jest {NOW:%Y-%m-%d}. "
+        "Poniżej wyniki wyszukiwania. Zwróć obiekt JSON z dwiema listami:\n"
+        '1) "przetargi": TYLKO aktualne zapytania ofertowe/przetargi w Polsce pasujące do drukarni '
+        "(termin w przyszłości lub brak terminu). Odrzuć oferty drukarni, sklepy, poradniki, rozstrzygnięcia, minione terminy. "
+        'Pola: {"url", "tytul", "zamawiajacy", "typ": "firma" lub "instytucja", "dotacja": true jeśli finansowane z UE/dotacji, '
+        '"termin": "RRRR-MM-DD" lub null, "wartosc_pln": liczba lub null, "opis": "max 10 słów: co drukować"}.\n'
+        '2) "leady": FIRMY prywatne (nie urzędy), które niedawno dostały dotację/dofinansowanie i mogą potrzebować '
+        "druku (promocja, targi, nowy produkt, eksport). Tylko gdy nazwa firmy jest w wyniku. "
+        'Pola: {"url", "firma", "powod": "max 12 słów: na co dotacja i co mogą chcieć drukować"}.\n'
+        "Nie podawaj danych osobowych (imion, telefonów, maili). Jeśli nic nie pasuje, zwróć puste listy.\n\n"
         + json.dumps(hits, ensure_ascii=False)
     )
-    items = json.loads(gemini(prompt, as_json=True))
-    out = []
-    for it in items if isinstance(items, list) else []:
+    res = json.loads(gemini(prompt, as_json=True))
+    if isinstance(res, list):
+        res = {"przetargi": res, "leady": []}
+    out, leads = [], []
+    for it in res.get("przetargi", []) or []:
         url = text_of(it.get("url"))
         if url not in urls:
-            continue  # tylko linki faktycznie znalezione, bez wymyślonych
+            continue  # tylko linki faktycznie znalezione
         val = it.get("wartosc_pln")
+        firma = text_of(it.get("typ")).lower().startswith("firma")
         out.append({
             "id": "web:" + url.split("#")[0].rstrip("/"),
-            "source": "Strony internetowe (do weryfikacji)",
+            "source": "Firmy prywatne" if firma else "Strony internetowe – instytucje (do weryfikacji)",
             "title": text_of(it.get("tytul")), "buyer": text_of(it.get("zamawiajacy")),
             "city": "", "province": "", "cpv": "",
             "deadline": fmt_date(it.get("termin")),
             "value_pln": float(val) if isinstance(val, (int, float)) else None,
             "summary": text_of(it.get("opis")) or text_of(it.get("tytul")),
-            "url": url,
+            "url": url, "firm": firma, "grant": bool(it.get("dotacja")),
         })
-    log(f"Internet: pasujących {len(out)}")
-    return out
+    for it in res.get("leady", []) or []:
+        url = text_of(it.get("url"))
+        if url not in urls or not text_of(it.get("firma")):
+            continue
+        leads.append({"id": "lead:" + url.split("#")[0].rstrip("/") + "|" + text_of(it.get("firma")).lower(),
+                      "firma": text_of(it.get("firma")), "powod": text_of(it.get("powod")), "url": url})
+    log(f"Internet: pasujących przetargów {len(out)}, potencjalnych klientów {len(leads)}")
+    return out, leads
 
 
 # ---------- e-mail ----------
@@ -306,7 +335,12 @@ def is_maz(c):
 
 def line(c):
     star = "⭐ " if is_maz(c) else ""
-    bits = [f"<b>{star}Przetarg: {escape(c.get('summary') or c['title'])}</b>"]
+    badge = ""
+    if c.get("firm") and c.get("grant"):
+        badge = ' <span style="background:#d4f5d4;padding:1px 6px;border-radius:4px">📞 KONTAKT REKOMENDOWANY (firma z dotacją)</span>'
+    elif c.get("firm"):
+        badge = " 🏢"
+    bits = [f"<b>{star}Przetarg: {escape(c.get('summary') or c['title'])}</b>{badge}"]
     if c["buyer"]:
         bits.append(escape(c["buyer"] + (f" ({c['city']})" if c["city"] else "")))
     if c["value_pln"]:
@@ -317,24 +351,31 @@ def line(c):
     return "<li>" + " · ".join(bits) + "</li>"
 
 
-def send(items):
+def send(items, leads):
     when = NOW.strftime("%d.%m.%Y %H:%M")
-    if items:
+    order = {"Firmy prywatne": 0}
+    if items or leads:
         groups = {}
-        for c in sorted(items, key=lambda c: (not is_maz(c), c["source"])):
+        for c in sorted(items, key=lambda c: (order.get(c["source"], 1), not c.get("grant"), not is_maz(c), c["source"])):
             groups.setdefault(c["source"], []).append(c)
-        html = f"<p>Nowe przetargi dla WIP-Druk ({when}). ⭐ = Mazowsze.</p>"
+        html = f"<p>Nowe przetargi dla WIP-Druk ({when}). 🏢 = firma · 📞 = kontakt rekomendowany · ⭐ = Mazowsze.</p>"
         for src, lst in groups.items():
             html += f"<h3>{escape(src)} ({len(lst)})</h3><ul>" + "".join(line(c) for c in lst) + "</ul>"
+        if leads:
+            html += f"<h3>🎯 Potencjalni klienci – firmy z nową dotacją ({len(leads)})</h3><ul>"
+            for l in leads:
+                html += (f"<li><b>📞 Kontakt rekomendowany: {escape(l['firma'])}</b> · {escape(l['powod'])} · "
+                         f'<a href="{escape(l["url"])}">źródło</a></li>')
+            html += "</ul><p style='color:#888;font-size:12px'>Potencjalni klienci to tylko informacja – nic nie jest wysyłane automatycznie.</p>"
         n = len(items)
         word = "nowy" if n == 1 else ("nowe" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "nowych")
-        subject = f"Przetargi WIP-Druk: {n} {word} ({NOW:%d.%m, %H:%M})"
+        subject = f"Przetargi WIP-Druk: {n} {word}" + (f" · potencjalni klienci: {len(leads)}" if leads else "") + f" ({NOW:%d.%m, %H:%M})"
     else:
         html = f"<p>Brak nowych przetargów ({when}).</p>"
-        subject = f"Przetargi WIP-Druk: brak nowych ({NOW:%d.%m %H:%M})"
+        subject = f"Przetargi WIP-Druk: brak nowych ({NOW:%d.%m, %H:%M})"
     if WARNINGS:
         html += "<p style='color:#888'>Uwaga: " + escape("; ".join(WARNINGS)) + "</p>"
-    html += "<p style='color:#888;font-size:12px'>Wiadomość automatyczna. Dane z BZP, TED i wyszukiwania internetowego; zawsze sprawdź szczegóły w ogłoszeniu.</p>"
+    html += "<p style='color:#888;font-size:12px'>Wiadomość automatyczna. Dane z BZP, TED, Bazy Konkurencyjności i wyszukiwania internetowego; zawsze sprawdź szczegóły w ogłoszeniu.</p>"
     r = S.post("https://api.brevo.com/v3/smtp/email", timeout=60,
                headers={"api-key": os.environ["BREVO_API_KEY"], "accept": "application/json"},
                json={"sender": {"email": os.environ["MAIL_FROM"], "name": "Przetargi WIP-Druk"},
@@ -372,9 +413,12 @@ def main():
         for c in cands:
             c["summary"] = c["title"]
 
+    leads = []
     if WEB_SEARCH:
         try:
-            cands += [c for c in web_search() if c["id"] not in seen]
+            web, lds = web_search()
+            cands += [c for c in web if c["id"] not in seen]
+            leads = [l for l in lds if l["id"] not in seen]
         except Exception as e:
             log(f"BŁĄD Gemini (internet): {e}")
             WARNINGS.append("wyszukiwanie internetowe niedostępne")
@@ -392,12 +436,12 @@ def main():
         log("Żadne źródło nie działa - przerywam (GitHub wyśle powiadomienie o błędzie).")
         sys.exit(1)
 
-    send(final)
+    send(final, leads)
 
     today = NOW.strftime("%Y-%m-%d")
     for c in raw:            # wszystkie pobrane oznaczamy jako widziane
         seen.setdefault(c["id"], today)
-    for c in final:
+    for c in final + leads:
         seen.setdefault(c["id"], today)
     cutoff = (NOW - timedelta(days=60)).strftime("%Y-%m-%d")
     seen = {k: v for k, v in seen.items() if v >= cutoff}
