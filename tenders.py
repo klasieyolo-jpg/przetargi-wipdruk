@@ -26,7 +26,7 @@ PROFILE = (
     "WIP-Druk to drukarnia offsetowa i cyfrowa z Warszawy (prepress, introligatornia). "
     "Bierze zlecenia: ulotki, plakaty, foldery, broszury, wizytówki, kalendarze, katalogi, "
     "teczki, zaproszenia, druk wielkoformatowy (banery, roll-upy), nietypowe opakowania "
-    "z kartonu lub papieru. NIE bierze: książek, czasopism, gazet, formularzy, papieru "
+    "z kartonu lub papieru, a także gadżety reklamowe i drobne artykuły biurowe (najlepiej z nadrukiem/logo): długopisy, naklejki, kubki, karteczki samoprzylepne, notesy, bloczki. NIE bierze: książek, czasopism, gazet, formularzy, papieru "
     "firmowego, ani zakupu drukarek/tonerów/serwisu urządzeń drukujących."
 )
 
@@ -35,6 +35,8 @@ KEYWORDS = [
     "kalendarz", "katalog", "teczk", "zaprosze", "baner", "banner", "roll-up", "rollup",
     "wielkoformat", "poligraf", "materiałów promocyjn", "materiały promocyjn",
     "materiałów informacyjn", "materiały informacyjn", "opakowa", "pudeł", "karton",
+    "długopis", "naklej", "etykiet", "kubk", "kubek", "karteczk", "notes", "bloczk",
+    "gadżet", "gadzet", "upominki", "artykuły biurowe", "artykułów biurowych",
 ]
 EXCLUDE = [
     "drukark", "toner", "tusz", "urządze", "wielofunkcyj", "ciągłości druku",
@@ -42,7 +44,8 @@ EXCLUDE = [
     "książk", "czasopism", "gazet", "formularz", "papier ksero", "papieru ksero",
     "papier do drukar", "papieru do drukar",
 ]
-CPV_PREFIXES = ["798", "2214", "2215", "2216", "2245", "2246", "2281", "2285", "4461"]
+CPV_PREFIXES = ["798", "2214", "2215", "2216", "2245", "2246", "2281", "2285", "4461",
+                "3019", "2282", "39294"]  # 3019 art. biurowe (długopisy, notesy), 39294 artykuły promocyjne
 
 S = requests.Session()
 S.headers["User-Agent"] = "wipdruk-przetargi/1.0"
@@ -218,11 +221,19 @@ def judge(cands):
     return keep
 
 
-WEB_QUERIES = [
-    "zapytanie ofertowe druk ulotek plakatów",
-    "zapytanie ofertowe druk kalendarzy katalogów broszur",
-    "zapytanie ofertowe druk materiałów promocyjnych teczek zaproszeń",
-    "zapytanie ofertowe druk wielkoformatowy banery roll-up opakowania kartonowe",
+WEB_QUERIES = [  # 12 zapytań x 2 przebiegi/dzień = ok. 720 z 1000 darmowych miesięcznie
+    "zapytanie ofertowe druk ulotek plakatów folderów",
+    "zapytanie ofertowe druk kalendarzy 2027",
+    "zapytanie ofertowe druk katalogów broszur",
+    "zapytanie ofertowe druk teczek zaproszeń wizytówek",
+    "zapytanie ofertowe druk materiałów promocyjnych informacyjnych projekt unijny",
+    "zapytanie ofertowe druk wielkoformatowy banery roll-up",
+    "zapytanie ofertowe opakowania kartonowe papierowe nadruk",
+    "rozeznanie rynku usługa poligraficzna druk",
+    "zaproszenie do złożenia oferty usługi drukarskie",
+    "bip zapytanie cenowe wykonanie druku",
+    "zapytanie ofertowe gadżety reklamowe długopisy kubki z nadrukiem",
+    "zapytanie ofertowe naklejki notesy karteczki z logo",
 ]
 
 
