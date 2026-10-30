@@ -18,7 +18,7 @@ NOW = datetime.now(TZ)
 SEEN_FILE = "seen.json"
 LOOKBACK_DAYS = 2          # ile dni wstecz sprawdzać (z zapasem; duplikaty odsiewa seen.json)
 MIN_VALUE_PLN = 5000       # próg; jeśli brak kwoty -> pokazujemy
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 WEB_SEARCH = os.getenv("WEB_SEARCH", "1") == "1"
 DEBUG = os.getenv("DEBUG", "0") == "1"
 
@@ -91,7 +91,7 @@ def fetch_bzp():
     date_from = (NOW - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%dT00:00:00")
     date_to = NOW.strftime("%Y-%m-%dT23:59:59")
     out, seen_ids = [], set()
-    for page in range(1, 41):
+    for page in range(1, 401):
         params = {
             "NoticeType": "ContractNotice",
             "PublicationDateFrom": date_from,
@@ -124,7 +124,7 @@ def fetch_bzp():
                 "value_pln": None,
                 "url": f"https://ezamowienia.gov.pl/mo-client-board/bzp/notice-details/id/{oid}",
             })
-        if new == 0 or len(items) < 500:
+        if not items or new == 0:
             break
     log(f"BZP: pobrano {len(out)} ogłoszeń")
     return out
@@ -188,6 +188,8 @@ def gemini(prompt, search=False, as_json=False):
     if as_json:
         body["generationConfig"] = {"responseMimeType": "application/json"}
     r = S.post(url, params={"key": key}, json=body, timeout=180)
+    if r.status_code != 200:
+        log(f"Gemini {r.status_code}: {r.text[:400]}")
     r.raise_for_status()
     parts = r.json()["candidates"][0]["content"]["parts"]
     return "".join(p.get("text", "") for p in parts)
