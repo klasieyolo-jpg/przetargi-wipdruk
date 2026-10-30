@@ -1,0 +1,43 @@
+name: Przetargi WIP-Druk
+
+on:
+  schedule:
+    - cron: "53 5 * * *"    # ok. 7:00 czasu polskiego zimą (8:00 latem)
+    - cron: "53 12 * * *"   # ok. 14:00 czasu polskiego zimą (15:00 latem)
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Tryb testowy (więcej logów)"
+        default: "1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: przetargi
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Szukaj i wyślij
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          DEBUG: ${{ github.event.inputs.debug || '0' }}
+        run: python tenders.py
+      - name: Zapisz listę wysłanych
+        run: |
+          git config user.name "przetargi-bot"
+          git config user.email "przetargi-bot@users.noreply.github.com"
+          git add seen.json
+          git diff --cached --quiet || (git commit -m "Aktualizacja listy wysłanych" && git push)
