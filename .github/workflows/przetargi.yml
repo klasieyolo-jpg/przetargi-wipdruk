@@ -30,6 +30,7 @@ jobs:
       - name: Szukaj i wyślij
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
