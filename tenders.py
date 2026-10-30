@@ -326,7 +326,9 @@ def send(items):
         html = f"<p>Nowe przetargi dla WIP-Druk ({when}). ⭐ = Mazowsze.</p>"
         for src, lst in groups.items():
             html += f"<h3>{escape(src)} ({len(lst)})</h3><ul>" + "".join(line(c) for c in lst) + "</ul>"
-        subject = f"Przetargi WIP-Druk: {len(items)} nowych ({NOW:%d.%m})"
+        n = len(items)
+        word = "nowy" if n == 1 else ("nowe" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "nowych")
+        subject = f"Przetargi WIP-Druk: {n} {word} ({NOW:%d.%m, %H:%M})"
     else:
         html = f"<p>Brak nowych przetargów ({when}).</p>"
         subject = f"Przetargi WIP-Druk: brak nowych ({NOW:%d.%m %H:%M})"
